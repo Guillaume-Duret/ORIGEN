@@ -91,7 +91,9 @@ class BaseSampler(ABC):
         return partial(grad_reward_func, pipe=pipe, **kwargs)
     
     def __call__(self, init_position, reward_model, pipe):
-        samples, rewards = self.run(init_position, self.get_grad_reward_func(reward_model, pipe), reward_model)
+        
+        #samples, rewards = self.run(init_position, self.get_grad_reward_func(reward_model, pipe), reward_model)
+        samples, rewards = self.run(init_position, self.get_grad_reward_func(reward_model, pipe))
         samples, best_sample, best_reward = self.custom_call_function(samples, rewards)
         best_sample = reward_model.success_sample if self.cfg.early_stop and reward_model.success else best_sample
         self.best_sample = best_sample
