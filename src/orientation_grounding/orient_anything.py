@@ -111,7 +111,7 @@ class DINOv2_MLP(nn.Module):
         if dino_mode == 'base':
             self.dinov2 = FLIP_DINOv2.from_pretrained(DINO_BASE, torch_dtype=dtype)
         elif dino_mode == 'large':
-            self.dinov2 = FLIP_DINOv2.from_pretrained(DINO_LARGE, torch_dtype=dtype, cache_dir='/home/dbsghd363/OrientGen')
+            self.dinov2 = FLIP_DINOv2.from_pretrained(DINO_LARGE, torch_dtype=dtype)
         elif dino_mode == 'small':
             self.dinov2 = FLIP_DINOv2.from_pretrained(DINO_SMALL, torch_dtype=dtype)
         elif dino_mode == 'giant':
