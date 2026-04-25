@@ -1,6 +1,9 @@
 import os
+import re
+import random
 import argparse
 from dataclasses import dataclass
+from datetime import datetime
 from PIL import ImageDraw
 import json
 import torch
@@ -19,49 +22,91 @@ class Config:
     height: int = 512
     width: int = 512
 
+
+def sanitize_filename(s: str, max_len: int = 50) -> str:
+    """Convert a string into a safe folder/file name."""
+    s = re.sub(r'[^a-zA-Z0-9\s\-_]', '', s)
+    s = s.replace(' ', '_')
+    return s[:max_len]
+
+
+def flatten_orientation(orient):
+    """Convert nested orientation list into a single underscore-separated string."""
+    if isinstance(orient, list):
+        return '_'.join(str(flatten_orientation(x)) for x in orient)
+    return str(orient)
+
+
 def main(CFG, args):
     device = torch.device("cuda:0")
     task_name = args.config.split("/")[-1].split(".")[0]
-    seed_everything(CFG.seed)
 
+    # ---- Generate random seed if not provided or set to 0 ----
+    if CFG.seed == 0:
+        # Use a random seed between 1 and 2**32-1
+        generated_seed = random.randint(1, 2**32 - 1)
+        print(f"No seed provided (value 0). Generating random seed: {generated_seed}")
+        CFG.seed = generated_seed
+    else:
+        print(f"Using config‑provided seed: {CFG.seed}")
+
+    # Set seed for reproducibility (torch, numpy, random)
+    seed_everything(CFG.seed)
+    print(f"Final seed used for this run: {CFG.seed}")
+
+    # ---- Load data early to build dynamic folder name ----
+    with open(args.data_path, 'r') as f:
+        data = json.load(f)
+
+    orientations = data['orientations'][0][0]
+    prompt = data["prompts"]
+    phrases = data['phrases']
+
+    orientation_str = flatten_orientation(orientations)
+    safe_prompt = sanitize_filename(prompt)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    unique_folder = f"seed{CFG.seed}_{safe_prompt}_{orientation_str}_{timestamp}"
+    base_dir = args.save_dir
+    args.save_dir = os.path.join(base_dir, unique_folder)
+    os.makedirs(args.save_dir, exist_ok=True)
+    print(f"Output will be saved to: {args.save_dir}")
+
+    # ---- Pipeline and reward model ----
     with suppress_print():
         pipe = FluxSchnellPipeline(device, CFG)
         reward_model = get_reward_model(task_name)(torch.float32, device, CFG)
-    
-    # load data
-    data = json.load(open(args.data_path, 'r'))
 
-    orientations = data['orientations'][0][0]
+    # Prepare data
     data['orientations'] = orientations
-    prompt = data["prompts"]
-    phrases = data['phrases']
-    # prompt preprocessing
     prompt = preprocess_prompt(prompt, phrases, orientations)
 
     pipe.load_encoder()
-    pipe.encode_prompt(prompt, CFG.negative_prompt, phrases=phrases)
+    negative_prompt = CFG.get("negative_prompt", None)
+    pipe.encode_prompt(prompt, negative_prompt, phrases=phrases)
     reward_model.register_data(data)
     pipe.unload_encoder()
 
     generator = torch.Generator(device=device).manual_seed(CFG.seed)
-    
-    _, best_sample, best_reward = pipe.sample(height=CFG.height, width=CFG.width, reward_model=reward_model, generator=generator)
-        
+    _, best_sample, best_reward = pipe.sample(
+        height=CFG.height, width=CFG.width,
+        reward_model=reward_model, generator=generator
+    )
+
     image = torchvision.transforms.ToPILImage()(best_sample[0].float().cpu().clamp(0, 1))
-    image.save(os.path.join(args.save_dir, f"output.png"))
-    
+    image.save(os.path.join(args.save_dir, "output.png"))
+
     if args.save_reward:
         draw = ImageDraw.Draw(image)
         text = f"{best_reward.item():.5f}" if hasattr(best_reward, "item") else f"{best_reward:.5f}"
-        draw.rectangle([0, 0, 60, 20], fill=(0, 0, 0, 128))  
+        draw.rectangle([0, 0, 60, 20], fill=(0, 0, 0, 128))
         draw.text((5, 2), text, fill=(255, 255, 255))
-        
-        # draw angle
+
         estimated_angles = reward_model.get_angle(best_sample)
         estimated_bboxes = reward_model.estimated_bboxes
-        
+
         image = draw_orientation(image, estimated_bboxes, estimated_angles)
-        image.save(os.path.join(args.save_dir, f"output_orientation_rendered.png"))
+        image.save(os.path.join(args.save_dir, "output_orientation_rendered.png"))
 
 
 if __name__ == "__main__":
@@ -75,7 +120,4 @@ if __name__ == "__main__":
     CFG = load_config(args.config, cli_args=extras)
 
     CFG.save_dir = args.save_dir
-    if args.save_reward:
-        os.makedirs(args.save_dir, exist_ok=True)
-
     main(CFG, args)
