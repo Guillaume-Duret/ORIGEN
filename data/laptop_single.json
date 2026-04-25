@@ -1,10 +1,10 @@
 {
-    "prompts": "a single laptop, centered in the frame on white background, showing its front side, no shadows, no reflections, from a three-quarter view and oriented by 15 degree",
+    "prompts": "a single laptop, centered in the frame on white background, showing its front side, no shadows, no reflections, from a three-quarter view",
     "orientations": [
         [
             [
                 [
-                    345,
+                    360,
                     90,
                     90
                 ]
